@@ -10,7 +10,9 @@ const builder = new xml2js.Builder({ rootName: 'Response', headless: true });
 // Exotel webhook when a call comes in
 router.post('/incoming', express.urlencoded({ extended: true }), async (req, res) => {
   try {
-    const { CallSid, From, To, ForwardedFrom } = req.body;
+    // Exotel can send data in Body (POST) or Query (URL)
+    const data = { ...req.query, ...req.body };
+    const { CallSid, From, To, ForwardedFrom } = data;
     
     console.log(`[CALL INCOMING] From: ${From}, To: ${To}, Forwarded: ${ForwardedFrom}`);
     
@@ -53,7 +55,8 @@ router.post('/incoming', express.urlencoded({ extended: true }), async (req, res
 // Exotel webhook when user speaks (Record/Gather completes)
 router.post('/gather', express.urlencoded({ extended: true }), async (req, res) => {
   try {
-    const { CallSid, RecordingUrl } = req.body;
+    const data = { ...req.query, ...req.body };
+    const { CallSid, RecordingUrl } = data;
     
     const session = getSession(CallSid);
     if (!session) {
