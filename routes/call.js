@@ -12,19 +12,19 @@ router.post('/incoming', express.urlencoded({ extended: true }), async (req, res
   try {
     // Exotel can send data in Body (POST) or Query (URL)
     const data = { ...req.query, ...req.body };
-    const { CallSid, From, To, ForwardedFrom } = data;
+    const { CallSid, From, To, ForwardedFrom, CallTo } = data;
     
-    console.log(`[CALL INCOMING] From: ${From}, To: ${To}, Forwarded: ${ForwardedFrom}`);
+    console.log(`[CALL INCOMING] From: ${From}, To: ${To}, Forwarded: ${ForwardedFrom}, CallTo: ${CallTo}`);
     
-    // Fallback if ForwardedFrom is missing but we know the To number
-    const lookupNumber = ForwardedFrom || To;
+    // Try all possible numbers to find the clinic (VN might be in To or CallTo)
+    const lookupNumber = ForwardedFrom || To || CallTo;
     
     const clinic = await getClinicByForwardedNumber(lookupNumber);
     
     if (!clinic) {
       console.log(`Unregistered number: ${lookupNumber}`);
       return sendExoML(res, [
-        { Say: "Sorry, this number is not registered. Please check the number and try again." },
+        { Say: "Welcome to Zeyphra Health. This number is not yet registered in our system. Please check with the clinic owner." },
         { Hangup: "" }
       ]);
     }
@@ -132,8 +132,13 @@ async function sendGather(res, text, clinic) {
   let promptNode;
   
   if (process.env.USE_CUSTOM_TTS === 'true') {
+    try {
       const audioUrl = await generateSpeechUrl(text, clinic.aiLanguage);
       promptNode = { Play: audioUrl };
+    } catch (err) {
+      console.error('TTS Generation failed, falling back to Say:', err.message);
+      promptNode = { Say: text };
+    }
   } else {
       promptNode = { Say: text };
   }
@@ -145,7 +150,7 @@ async function sendGather(res, text, clinic) {
         $: {
           action: `${process.env.BACKEND_URL}/call/gather`,
           maxLength: 15,
-          playBeep: false
+          playBeep: true // Enabled beep to help user know when to speak
         }
       }
     }
