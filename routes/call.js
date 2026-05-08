@@ -1,5 +1,5 @@
 import express from 'express';
-import { getClinicByForwardedNumber, getSession, setSession, logCall } from '../services/firebase.js';
+import { getClinicByForwardedNumber, getClinicByPin, getSession, setSession, logCall } from '../services/firebase.js';
 import { transcribeAudio, generateAIResponse, detectIntent } from '../services/groq.js';
 import { generateSpeechUrl } from '../services/tts.js';
 import xml2js from 'xml2js';
@@ -7,31 +7,54 @@ import xml2js from 'xml2js';
 const router = express.Router();
 const builder = new xml2js.Builder({ rootName: 'Response', headless: true });
 
-// Exotel webhook when a call comes in
-router.post('/incoming', express.urlencoded({ extended: true }), async (req, res) => {
+// Exotel webhook when a call comes in (Supports both GET and POST)
+router.all('/incoming', express.urlencoded({ extended: true }), async (req, res) => {
   try {
-    // Exotel can send data in Body (POST) or Query (URL)
+    // Exotel can send data in Body (POST) or Query (URL/GET)
     const data = { ...req.query, ...req.body };
-    const { CallSid, From, To, ForwardedFrom, CallTo } = data;
+    const { CallSid, From, To, ForwardedFrom, CallTo, CallFrom, Digits } = data;
     
-    console.log(`[CALL INCOMING] From: ${From}, To: ${To}, Forwarded: ${ForwardedFrom}, CallTo: ${CallTo}`);
+    // Normalize parameter names (Exotel uses both From/CallFrom)
+    const callerNumber = From || CallFrom;
+    const dialedNumber = To || CallTo;
+
+    console.log('[DEBUG] Incoming Call:', { callerNumber, dialedNumber, ForwardedFrom, Digits });
     
-    // Try all possible numbers to find the clinic (VN might be in To or CallTo)
-    const lookupNumber = ForwardedFrom || To || CallTo;
-    
-    const clinic = await getClinicByForwardedNumber(lookupNumber);
+    let clinic = null;
+
+    // 1. PRIMARY: Look for the doctor's number in 'ForwardedFrom'
+    if (ForwardedFrom) {
+      console.log(`[DEBUG] Searching by ForwardedFrom: ${ForwardedFrom}`);
+      clinic = await getClinicByForwardedNumber(ForwardedFrom);
+    }
+
+    // 2. SECONDARY: Look for the doctor's number in 'dialedNumber' (if it's a direct VN)
+    if (!clinic && dialedNumber) {
+      console.log(`[DEBUG] Searching by DialedNumber: ${dialedNumber}`);
+      clinic = await getClinicByForwardedNumber(dialedNumber);
+    }
+
+    // 3. TERTIARY: Look for caller in case it's a known number
+    if (!clinic && callerNumber) {
+      clinic = await getClinicByForwardedNumber(callerNumber);
+    }
+
+    // 4. QUATERNARY: Fallback to PIN
+    if (!clinic && Digits) {
+      clinic = await getClinicByPin(Digits);
+    }
     
     if (!clinic) {
-      console.log(`Unregistered number: ${lookupNumber}`);
+      console.log(`[ERROR] Clinic not found. From: ${From}, ForwardedFrom: ${ForwardedFrom}, Digits: ${Digits}`);
       return sendExoML(res, [
-        { Say: "Welcome to Zeyphra Health. This number is not yet registered in our system. Please check with the clinic owner." },
+        { Say: "Welcome to Zeyphra Health. We couldn't identify the clinic for this call. Please ensure your number is registered." },
         { Hangup: "" }
       ]);
     }
 
     // Initialize conversation history
     const initialHistory = [];
-    setSession(CallSid, { clinic, history: initialHistory, caller: From });
+    setSession(CallSid, { clinic, history: initialHistory, caller: callerNumber });
 
     // Initial greeting
     const greeting = `Hello! Welcome to ${clinic.clinicName}. I am ${clinic.aiName || 'your virtual assistant'}. How can I help you today?`;
@@ -39,7 +62,7 @@ router.post('/incoming', express.urlencoded({ extended: true }), async (req, res
     // Log call start
     await logCall(clinic.id, {
       callSid: CallSid,
-      caller: From,
+      caller: callerNumber,
       startTime: new Date().toISOString(),
       status: 'started'
     });
@@ -53,21 +76,19 @@ router.post('/incoming', express.urlencoded({ extended: true }), async (req, res
 });
 
 // Exotel webhook when user speaks (Record/Gather completes)
-router.post('/gather', express.urlencoded({ extended: true }), async (req, res) => {
+router.all('/gather', express.urlencoded({ extended: true }), async (req, res) => {
   try {
     const data = { ...req.query, ...req.body };
     const { CallSid, RecordingUrl } = data;
     
     const session = getSession(CallSid);
     if (!session) {
-      // Session lost, gracefully hangup or restart
       return sendExoML(res, [{ Say: "Sorry, the session expired." }, { Hangup: "" }]);
     }
     
     const { clinic, history, caller } = session;
 
     if (!RecordingUrl) {
-       // If no audio was recorded
        return sendGather(res, "I'm sorry, I didn't catch that. Could you please repeat?", clinic);
     }
 
@@ -79,31 +100,26 @@ router.post('/gather', express.urlencoded({ extended: true }), async (req, res) 
        return sendGather(res, "I couldn't hear you clearly. Could you say that again?", clinic);
     }
 
-    // Add user message to history
     history.push({ role: 'user', content: userText });
 
-    // 2. Check Intent (optional early exit for specific tasks)
+    // 2. Check Intent
     const intent = await detectIntent(userText);
     
     if (intent === 'TRANSFER_TO_DOCTOR' && clinic.doctorMobile) {
       const responseText = "Okay, transferring your call to the doctor now. Please wait.";
       return sendExoML(res, [
         { Say: responseText },
-        { Dial: clinic.doctorMobile } // Blind transfer
+        { Dial: clinic.doctorMobile }
       ]);
     }
 
-    // 3. Generate AI Response (LLaMA)
+    // 3. Generate AI Response
     const aiResponseText = await generateAIResponse(history, clinic);
     console.log(`[AI] ${aiResponseText}`);
     
-    // Add AI message to history
     history.push({ role: 'assistant', content: aiResponseText });
-    
-    // Update session
     setSession(CallSid, session);
 
-    // Check if the AI ended the conversation or if it was a goodbye
     if (intent === 'GOODBYE' || aiResponseText.toLowerCase().includes('goodbye')) {
         return sendExoML(res, [
             { Say: aiResponseText },
@@ -111,13 +127,12 @@ router.post('/gather', express.urlencoded({ extended: true }), async (req, res) 
         ]);
     }
 
-    // 4. Send back to Exotel to play and record next input
     return sendGather(res, aiResponseText, clinic);
 
   } catch (err) {
     console.error('Gather error:', err);
     return sendExoML(res, [
-      { Say: "Sorry, there was a technical error." },
+      { Say: "Ek minute please, kuch technical issue aa raha hai." },
       { Hangup: "" }
     ]);
   }
@@ -125,10 +140,6 @@ router.post('/gather', express.urlencoded({ extended: true }), async (req, res) 
 
 // Helper to send Exotel ML (XML) for gathering input
 async function sendGather(res, text, clinic) {
-  // Option A: Use Exotel's built-in TTS (Say)
-  // Option B: Generate custom TTS and use <Play> (Better voice quality)
-  
-  // Using custom TTS (Sarvam/ElevenLabs) if available, fallback to Say
   let promptNode;
   
   if (process.env.USE_CUSTOM_TTS === 'true') {
@@ -136,7 +147,6 @@ async function sendGather(res, text, clinic) {
       const audioUrl = await generateSpeechUrl(text, clinic.aiLanguage);
       promptNode = { Play: audioUrl };
     } catch (err) {
-      console.error('TTS Generation failed, falling back to Say:', err.message);
       promptNode = { Say: text };
     }
   } else {
@@ -150,7 +160,7 @@ async function sendGather(res, text, clinic) {
         $: {
           action: `${process.env.BACKEND_URL}/call/gather`,
           maxLength: 15,
-          playBeep: true // Enabled beep to help user know when to speak
+          playBeep: true
         }
       }
     }

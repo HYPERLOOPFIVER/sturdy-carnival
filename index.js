@@ -15,18 +15,20 @@ app.use(express.json()); // For standard JSON payloads
 // Note: callRoutes uses express.urlencoded internally because Exotel sends x-www-form-urlencoded
 
 // Initialize Services
+console.log('🔄 Starting service initialization...');
+
 try {
   initFirebase();
-  console.log('✅ Firebase initialized');
+  console.log('✅ Firebase Admin: Initialized successfully');
 } catch (err) {
-  console.error('❌ Firebase init failed:', err.message);
+  console.error('❌ Firebase Admin: Initialization failed:', err.message);
 }
 
 try {
   initGroq();
-  console.log('✅ Groq initialized');
+  console.log('✅ Groq SDK: Initialized successfully');
 } catch (err) {
-  console.error('❌ Groq init failed:', err.message);
+  console.error('❌ Groq SDK: Initialization failed:', err.message);
 }
 
 // Routes

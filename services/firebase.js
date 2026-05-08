@@ -68,6 +68,19 @@ export async function getClinicByForwardedNumber(forwardedNumber) {
   return { id: doc.id, ...doc.data() };
 }
 
+export async function getClinicByPin(pin) {
+  const snapshot = await getDb()
+    .collection('clinics')
+    .where('pin', '==', pin)
+    .where('isActive', '==', true)
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) return null;
+  const doc = snapshot.docs[0];
+  return { id: doc.id, ...doc.data() };
+}
+
 export async function getClinicById(clinicId) {
   const doc = await getDb().collection('clinics').doc(clinicId).get();
   if (!doc.exists) return null;
