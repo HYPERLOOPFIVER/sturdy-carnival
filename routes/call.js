@@ -45,15 +45,16 @@ router.all('/voicebot', async (req, res) => {
       websocket_url: bridgeUrl
     });
 
-// TEST ROUTE: To see if Exotel can even hear our server
-router.all('/test-voice', (req, res) => {
-  console.log('[DEBUG] Test Voice Request Received');
-  return sendExoML(res, { Say: "Hello! If you hear this, our server is connected to Exotel." });
-});
   } catch (err) {
     console.error('Voicebot error:', err);
     res.status(500).json({ error: 'Failed' });
   }
+});
+
+// TEST ROUTE: To see if Exotel can even hear our server
+router.all('/test-voice', (req, res) => {
+  console.log('[DEBUG] Test Voice Request Received');
+  return sendExoML(res, { Say: "Hello! If you hear this, our server is connected to Exotel." });
 });
 
 // MAIN INCOMING ROUTE: For Exotel's "Passthru" or "Connect" Applets
