@@ -17,57 +17,46 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws, req) => {
     console.log('[BRIDGE] Connection attempt detected...');
     
-    console.log('[BRIDGE] Connecting to Vapi...');
     const vapiKey = process.env.VAPI_PRIVATE_KEY;
-    
     const vapiWs = new WebSocket('wss://api.vapi.ai', {
-      headers: {
-        Authorization: `Bearer ${vapiKey}`
-      }
-    });
-
-    vapiWs.on('upgrade', (res) => {
-      console.log(`[BRIDGE] Vapi Handshake status: ${res.statusCode}`);
+        headers: { Authorization: `Bearer ${vapiKey}` }
     });
 
     vapiWs.on('open', () => {
-      console.log('[BRIDGE] Successfully Connected to Vapi!');
-      vapiWs.send(JSON.stringify({
-        type: 'start-conversation',
-        assistantId: process.env.VAPI_ASSISTANT_ID
-      }));
-    });
-    
-    // Pipe data: Exotel -> Vapi (Wrap in JSON)
-    ws.on('message', (data) => {
-      if (vapiWs.readyState === WebSocket.OPEN) {
+        console.log('[BRIDGE] Connected to Vapi');
         vapiWs.send(JSON.stringify({
-          type: 'add-audio',
-          audio: data.toString('base64')
+            type: 'start-conversation',
+            assistantId: process.env.VAPI_ASSISTANT_ID
         }));
-      }
     });
 
-    // Pipe data: Vapi -> Exotel (Unwrap from JSON)
-    vapiWs.on('message', (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        if (msg.type === 'audio-output' && ws.readyState === WebSocket.OPEN) {
-          ws.send(Buffer.from(msg.audio, 'base64'));
+    // Pipe data: Exotel -> Vapi
+    ws.on('message', (data) => {
+        if (vapiWs.readyState === WebSocket.OPEN) {
+            vapiWs.send(JSON.stringify({
+                type: 'add-audio',
+                audio: data.toString('base64')
+            }));
         }
-      } catch (err) {
-        // Ignore non-JSON messages (like raw audio if Vapi sends it)
-      }
+    });
+
+    // Pipe data: Vapi -> Exotel
+    vapiWs.on('message', (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === 'audio-output' && ws.readyState === WebSocket.OPEN) {
+                ws.send(Buffer.from(msg.audio, 'base64'));
+            }
+        } catch (err) { /* Ignore non-JSON messages */ }
     });
 
     ws.on('close', () => {
-      console.log('[BRIDGE] Exotel disconnected');
-      vapiWs.close();
+        console.log('[BRIDGE] Exotel disconnected');
+        vapiWs.close();
     });
 
     vapiWs.on('close', () => ws.close());
     vapiWs.on('error', (err) => console.error('[BRIDGE] Vapi Error:', err));
-  }
 });
 
 // Middleware
@@ -77,17 +66,17 @@ app.use(express.json());
 // Initialize Services
 console.log('🔄 Starting service initialization...');
 try {
-  initFirebase();
-  console.log('✅ Firebase Admin: Initialized successfully');
+    initFirebase();
+    console.log('✅ Firebase Admin: Initialized successfully');
 } catch (err) {
-  console.error('❌ Firebase Admin: Initialization failed:', err.message);
+    console.error('❌ Firebase Admin: Initialization failed:', err.message);
 }
 
 try {
-  initGroq();
-  console.log('✅ Groq SDK: Initialized successfully');
+    initGroq();
+    console.log('✅ Groq SDK: Initialized successfully');
 } catch (err) {
-  console.error('❌ Groq SDK: Initialization failed:', err.message);
+    console.error('❌ Groq SDK: Initialization failed:', err.message);
 }
 
 // Routes
@@ -95,12 +84,12 @@ app.use('/call', callRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Zeyphra Call AI Backend running on port ${PORT}`);
+    console.log(`🚀 Zeyphra Call AI Backend running on port ${PORT}`);
 });
 
 export default app;
