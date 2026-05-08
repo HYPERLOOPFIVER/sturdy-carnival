@@ -7,6 +7,30 @@ import xml2js from 'xml2js';
 const router = express.Router();
 const builder = new xml2js.Builder({ rootName: 'Response', headless: true });
 
+// VOICEBOT ROUTE: For Exotel's "Voicebot" Applet (Real-time AI)
+router.all('/voicebot', async (req, res) => {
+  try {
+    const data = { ...req.query, ...req.body };
+    const { CallSid, From, CallFrom } = data;
+    const callerNumber = From || CallFrom;
+
+    console.log(`[VOICEBOT] Incoming request for: ${callerNumber}`);
+
+    // Return the JSON Exotel expects for the Voicebot applet
+    return res.json({
+      url: "wss://api.vapi.ai/api/v1/stream", // We connect to Vapi for the "Brain"
+      params: {
+        customer_phone_number: callerNumber,
+        // You can add your Vapi Public Key here
+        vapi_public_key: process.env.VAPI_PUBLIC_KEY 
+      }
+    });
+  } catch (err) {
+    console.error('Voicebot error:', err);
+    res.status(500).json({ error: 'Failed to connect bot' });
+  }
+});
+
 // Exotel webhook when a call comes in (Supports both GET and POST)
 router.all('/incoming', express.urlencoded({ extended: true }), async (req, res) => {
   try {
