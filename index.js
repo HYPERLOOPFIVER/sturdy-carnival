@@ -53,8 +53,8 @@ wss.on('connection', async (ws, req) => {
                 type: 'start',
                 assistantId: assistantId,
                 audio: {
-                    input: { encoding: 'mulaw', sampleRate: 8000 },
-                    output: { encoding: 'mulaw', sampleRate: 8000 }
+                    input: { encoding: 'linear16', sampleRate: 8000 },
+                    output: { encoding: 'linear16', sampleRate: 8000 }
                 }
             }));
         });
