@@ -14,50 +14,82 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 // WebSocket Bridge: Exotel <-> Railway <-> Vapi
-wss.on('connection', (ws, req) => {
+wss.on('connection', async (ws, req) => {
     console.log('[BRIDGE] Connection attempt detected...');
     
-    const vapiKey = process.env.VAPI_PRIVATE_KEY || process.env.VAPI_PUBLIC_KEY;
-    const assistantId = process.env.VAPI_ASSISTANT_ID;
+    try {
+        const vapiKey = process.env.VAPI_PRIVATE_KEY || process.env.VAPI_PUBLIC_KEY;
+        const assistantId = process.env.VAPI_ASSISTANT_ID;
 
-    // Use the exact URL provided
-    const vapiWs = new WebSocket(`wss://api.vapi.ai/api/v1/call/websocket?apiKey=${vapiKey}`);
+        // 1. CREATE VAPI CALL FIRST (Modern Flow)
+        console.log('[BRIDGE] Creating Vapi call...');
+        const response = await fetch('https://api.vapi.ai/call', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${vapiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                assistantId: assistantId,
+                transport: {
+                    provider: 'websocket'
+                }
+            })
+        });
 
-    vapiWs.on('open', () => {
-        console.log('[BRIDGE] Connected to Vapi');
-        vapiWs.send(JSON.stringify({
-            type: 'start',
-            assistantId: assistantId
-        }));
-    });
-
-    // Pipe data: Exotel -> Vapi (Wrap in JSON)
-    ws.on('message', (data) => {
-        if (vapiWs.readyState === WebSocket.OPEN) {
-            vapiWs.send(JSON.stringify({
-                type: 'add-audio',
-                audio: data.toString('base64')
-            }));
+        const callData = await response.json();
+        
+        if (!callData.websocketCallUrl) {
+            console.error('[BRIDGE] Vapi failed to provide WebSocket URL:', callData);
+            ws.close();
+            return;
         }
-    });
 
-    // Pipe data: Vapi -> Exotel (Unwrap from JSON)
-    vapiWs.on('message', (data) => {
-        try {
-            const msg = JSON.parse(data.toString());
-            if (msg.type === 'audio-output' && ws.readyState === WebSocket.OPEN) {
-                ws.send(Buffer.from(msg.audio, 'base64'));
+        console.log('[BRIDGE] Dynamic URL obtained. Connecting...');
+        
+        // 2. CONNECT TO DYNAMIC URL
+        const vapiWs = new WebSocket(callData.websocketCallUrl);
+
+        vapiWs.on('open', () => {
+            console.log('[BRIDGE] Connected to Vapi');
+        });
+
+        // Pipe data: Exotel -> Vapi (Wrap in JSON)
+        ws.on('message', (data) => {
+            if (vapiWs.readyState === WebSocket.OPEN) {
+                vapiWs.send(JSON.stringify({
+                    type: 'add-audio',
+                    audio: data.toString('base64')
+                }));
             }
-        } catch (err) { /* Ignore non-JSON messages */ }
-    });
+        });
 
-    ws.on('close', () => {
-        console.log('[BRIDGE] Exotel disconnected');
-        vapiWs.close();
-    });
+        // Pipe data: Vapi -> Exotel (Unwrap from JSON)
+        vapiWs.on('message', (data) => {
+            try {
+                const msg = JSON.parse(data.toString());
+                if (msg.type === 'audio-output' && ws.readyState === WebSocket.OPEN) {
+                    ws.send(Buffer.from(msg.audio, 'base64'));
+                }
+            } catch (err) { /* Ignore non-JSON messages */ }
+        });
 
-    vapiWs.on('close', () => ws.close());
-    vapiWs.on('error', (err) => console.error('[BRIDGE] Vapi Error:', err));
+        ws.on('close', () => {
+            console.log('[BRIDGE] Exotel disconnected');
+            if (vapiWs.readyState === WebSocket.OPEN) vapiWs.close();
+        });
+
+        vapiWs.on('close', () => {
+            console.log('[BRIDGE] Vapi disconnected');
+            ws.close();
+        });
+
+        vapiWs.on('error', (err) => console.error('[BRIDGE] Vapi Error:', err));
+
+    } catch (err) {
+        console.error('[BRIDGE] Bridge Error:', err.message);
+        ws.close();
+    }
 });
 
 // Middleware
@@ -68,17 +100,11 @@ app.use(express.json());
 console.log('🔄 Starting service initialization...');
 try {
     initFirebase();
-    console.log('✅ Firebase Admin: Initialized successfully');
-} catch (err) {
-    console.error('❌ Firebase Admin: Initialization failed:', err.message);
-}
+} catch (err) {}
 
 try {
     initGroq();
-    console.log('✅ Groq SDK: Initialized successfully');
-} catch (err) {
-    console.error('❌ Groq SDK: Initialization failed:', err.message);
-}
+} catch (err) {}
 
 // Routes
 app.use('/call', callRoutes);
