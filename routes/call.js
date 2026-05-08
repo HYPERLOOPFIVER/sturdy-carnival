@@ -11,18 +11,36 @@ const builder = new xml2js.Builder({ rootName: 'Response', headless: true });
 router.all('/voicebot', async (req, res) => {
   try {
     const data = { ...req.query, ...req.body };
-    const { CallSid, From, CallFrom } = data;
+    const { CallSid, From, CallFrom, ForwardedFrom } = data;
     const callerNumber = From || CallFrom;
+    
+    console.log(`[VOICEBOT] Incoming request for: ${callerNumber}, ForwardedFrom: ${ForwardedFrom}`);
 
-    console.log(`[VOICEBOT] Incoming request for: ${callerNumber}`);
+    // 1. Look up the clinic (Dynamic Doctor Logic!)
+    let clinic = null;
+    if (ForwardedFrom) clinic = await getClinicByForwardedNumber(ForwardedFrom);
+    if (!clinic) clinic = await getClinicByForwardedNumber(callerNumber);
+    
+    // Fallback if no clinic found
+    const clinicName = clinic ? clinic.clinicName : "Zeyphra Health";
+    const doctorName = clinic ? clinic.doctorName : "the Doctor";
+    const systemPrompt = clinic 
+      ? `You are ${clinic.aiName || 'Priya'}, the AI assistant for ${clinicName}. Doctor is ${doctorName}. Be warm and helpful. Speak in Hinglish.`
+      : "You are a helpful medical assistant for Zeyphra Health. How can I help?";
 
-    // Return the JSON Exotel expects for the Voicebot applet
+    // 2. Return the JSON with Dynamic Overrides
     return res.json({
-      url: "wss://api.vapi.ai/api/v1/stream", // We connect to Vapi for the "Brain"
+      url: "wss://api.vapi.ai/api/v1/stream", 
       params: {
-        customer_phone_number: callerNumber,
-        // You can add your Vapi Public Key here
-        vapi_public_key: process.env.VAPI_PUBLIC_KEY 
+        vapi_public_key: process.env.VAPI_PUBLIC_KEY,
+        vapi_assistant_id: process.env.VAPI_ASSISTANT_ID,
+        // DYNAMIC OVERRIDE: This makes the AI act like the specific doctor!
+        assistant_override: {
+          name: clinic ? clinic.aiName : "Priya",
+          model: {
+             messages: [{ role: "system", content: systemPrompt }]
+          }
+        }
       }
     });
   } catch (err) {
