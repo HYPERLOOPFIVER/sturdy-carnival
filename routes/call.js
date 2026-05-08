@@ -35,9 +35,20 @@ router.all('/voicebot', async (req, res) => {
     }
 
     const callerNumber = data.From || data.CallFrom;
-    const vapiWss = `wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}&vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}&customer_phone_number=${callerNumber}`;
+    console.log(`[EXOTEL] Fresh Voicebot request from: ${callerNumber}`);
 
-    return res.json({ url: vapiWss });
+    // Try a "Self-Contained" URL that doesn't use '?' if possible, 
+    // or provide everything in a super-clean JSON
+    const vapiWss = `wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}&vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}`;
+
+    return res.json({
+      url: vapiWss,
+      wss_url: vapiWss,
+      params: {
+        vapi_public_key: process.env.VAPI_PUBLIC_KEY,
+        vapi_assistant_id: process.env.VAPI_ASSISTANT_ID
+      }
+    });
   } catch (err) {
     console.error('Voicebot error:', err);
     res.status(500).json({ error: 'Failed' });
