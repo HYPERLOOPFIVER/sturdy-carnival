@@ -1,18 +1,23 @@
 import Groq from 'groq-sdk';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
+import { getClinicByForwardedNumber } from './firebase.js';
 
 let groq;
+const sessions = new Map();
 
 export function initGroq() {
   groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   console.log('✅ Groq initialized');
 }
 
+// ─── Session Management ───────────────────────────────────────
+export const getSession = (id) => sessions.get(id);
+export const setSession = (id, data) => sessions.set(id, data);
+
 // ─── Speech-to-Text ──────────────────────────────────────────
 export async function transcribeAudio(audioUrl) {
   try {
-    // Download audio from Exotel (needs basic auth)
     const auth = Buffer.from(
       `${process.env.EXOTEL_API_KEY}:${process.env.EXOTEL_API_TOKEN}`
     ).toString('base64');
@@ -24,13 +29,6 @@ export async function transcribeAudio(audioUrl) {
     if (!audioResponse.ok) throw new Error(`Audio fetch failed: ${audioResponse.status}`);
     const audioBuffer = await audioResponse.buffer();
 
-    // Send to Groq Whisper via multipart form
-    const form = new FormData();
-    form.append('file', audioBuffer, { filename: 'audio.wav', contentType: 'audio/wav' });
-    form.append('model', 'whisper-large-v3');
-    form.append('response_format', 'text');
-    form.append('language', 'hi'); // Hindi + English mixed works great
-
     const transcription = await groq.audio.transcriptions.create({
       file: audioBuffer,
       model: 'whisper-large-v3',
@@ -41,6 +39,43 @@ export async function transcribeAudio(audioUrl) {
   } catch (err) {
     console.error('Transcription error:', err.message);
     return null;
+  }
+}
+
+// ─── Main AI Handler ──────────────────────────────────────────
+export async function getAIResponse(audioUrl, session, callerNumber) {
+  try {
+    // 1. Transcribe audio
+    const transcription = await transcribeAudio(audioUrl);
+    if (!transcription) return "Sorry, I couldn't hear you. Can you repeat that?";
+    console.log(`[USER]: ${transcription}`);
+
+    // 2. Add to history
+    session.messages.push({ role: 'user', content: transcription });
+
+    // 3. Get clinic info (from session or database)
+    let clinic = session.clinic;
+    if (!clinic && session.clinicId) {
+       // In a real app, you'd fetch the full clinic object here
+       // For now, let's assume session already has enough info or we fetch it once
+       // clinic = await getClinicById(session.clinicId); 
+    }
+    
+    // Fallback if clinic data isn't in session yet
+    const clinicContext = {
+      clinicName: session.clinicName || "Zeyphra Health",
+      doctorName: session.doctorName || "the Doctor",
+      aiName: session.aiName || "Priya"
+    };
+
+    // 4. Generate AI response
+    const aiText = await generateAIResponse(session.messages, clinicContext);
+    session.messages.push({ role: 'assistant', content: aiText });
+
+    return aiText;
+  } catch (err) {
+    console.error('AI Processing Error:', err);
+    return "Ek minute please, technical issue.";
   }
 }
 
@@ -56,7 +91,7 @@ export async function generateAIResponse(conversationHistory, clinic) {
         ...conversationHistory,
       ],
       temperature: 0.6,
-      max_tokens: 150, // Short for voice — 2-3 sentences max
+      max_tokens: 150,
     });
 
     return completion.choices[0].message.content.trim();
@@ -69,51 +104,25 @@ export async function generateAIResponse(conversationHistory, clinic) {
 // ─── System Prompt Builder ────────────────────────────────────
 function buildSystemPrompt(clinic) {
   const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-  const days = clinic.workingDays?.join(', ') || 'Monday to Saturday';
-  const commands = (clinic.commands || [])
-    .map(c => `- If asked about "${c.trigger}": ${c.response}`)
-    .join('\n');
+  const clinicName = clinic.clinicName || "Zeyphra Health";
+  const doctorName = clinic.doctorName || "the Doctor";
 
-  return `You are ${clinic.aiName || 'Priya'}, the AI receptionist for ${clinic.clinicName}.
-
-CLINIC INFO:
-- Doctor: ${clinic.doctorName} (${clinic.qualification || ''})
-- Specialty: ${clinic.specialty || 'General Physician'}
-- Address: ${clinic.address}, ${clinic.city}
-- Working Days: ${days}
-- Hours: ${clinic.openTime || '10:00'} to ${clinic.closeTime || '20:00'}
-${clinic.hasLunchBreak ? `- Lunch Break: ${clinic.lunchStart} to ${clinic.lunchEnd}` : ''}
-- Consultation Fee: ₹${clinic.consultationFee || 'N/A'}
-- Languages: ${(clinic.languages || ['Hindi', 'English']).join(', ')}
-- Services: ${(clinic.services || []).join(', ')}
-${clinic.insuranceAccepted ? `- Insurance: ${clinic.insuranceAccepted}` : ''}
-
-CUSTOM KNOWLEDGE BASE:
-${commands || '(none)'}
-
-CURRENT TIME: ${now}
-
-INSTRUCTIONS:
-- Speak in ${clinic.aiLanguage || 'Hinglish'} (natural mix of Hindi & English)
-- Keep ALL responses under 2-3 short sentences — this is a phone call
-- To book appointment: collect patient name → preferred date → preferred time → confirm
-- If clinic is currently closed, acknowledge and offer next available slot
-- If patient insists on speaking to doctor, say you'll transfer
-- Be warm, professional, and efficient
-- Never reveal you are an AI unless directly asked
-- When booking is confirmed, say "Appointment confirm ho gaya" and give details
-- Output ONLY the spoken response, no extra formatting`;
+  return `You are ${clinic.aiName || 'Priya'}, the AI receptionist for ${clinicName}.
+Doctor is ${doctorName}.
+Speak in Hinglish (mix of Hindi and English).
+Keep responses under 2 sentences.
+Be professional and warm.`;
 }
 
 // ─── Intent Detection ─────────────────────────────────────────
 export async function detectIntent(text) {
   try {
     const res = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant', // Fast model for intent
+      model: 'llama-3.1-8b-instant',
       messages: [
         {
           role: 'system',
-          content: `Classify the user's intent into one of: BOOK_APPOINTMENT, CANCEL_APPOINTMENT, ASK_TIMINGS, ASK_FEE, ASK_LOCATION, ASK_DOCTOR, TRANSFER_TO_DOCTOR, GENERAL_QUERY, GOODBYE. Reply with ONLY the intent label.`,
+          content: `Classify the user's intent into one of: BOOK_APPOINTMENT, GENERAL_QUERY, GOODBYE. Reply with ONLY the label.`,
         },
         { role: 'user', content: text },
       ],

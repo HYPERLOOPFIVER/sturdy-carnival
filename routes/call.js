@@ -1,26 +1,26 @@
 import express from 'express';
-import { getClinicByForwardedNumber, getClinicByPin, getSession, setSession, logCall } from '../services/firebase.js';
-import { transcribeAudio, generateAIResponse, detectIntent } from '../services/groq.js';
-import { generateSpeechUrl } from '../services/tts.js';
 import xml2js from 'xml2js';
+import { getClinicByForwardedNumber, getClinicByPin, logCall } from '../services/firebase.js';
+import { getAIResponse, setSession, getSession } from '../services/groq.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const router = express.Router();
 const builder = new xml2js.Builder({ rootName: 'Response', headless: true });
 
-// Middleware to handle both JSON (Vapi) and Form-Encoded (Exotel)
+// Middleware to handle both JSON and Form-Encoded data
 router.use(express.json());
 router.use(express.urlencoded({ extended: true }));
 
 // VOICEBOT ROUTE: For Exotel's "Voicebot" Applet (Real-time AI)
-// VOICEBOT ROUTE: Handles BOTH Exotel's initial request AND Vapi's assistant-request
 router.all('/voicebot', async (req, res) => {
   try {
     const data = { ...req.query, ...req.body };
     
-    // 1. Handle Vapi's request for assistant config
     if (data.message && data.message.type === 'assistant-request') {
       const callerNumber = data.message.call.customer.number;
-      console.log(`[VAPI] Dynamic prompt request for: ${callerNumber}`);
+      console.log(`[VAPI] Request for: ${callerNumber}`);
       
       let clinic = await getClinicByForwardedNumber(callerNumber);
       const clinicName = clinic ? clinic.clinicName : "Zeyphra Health";
@@ -34,180 +34,103 @@ router.all('/voicebot', async (req, res) => {
       });
     }
 
-    // 2. Handle Exotel's initial request (Return the WSS URL)
     const callerNumber = data.From || data.CallFrom;
-    console.log(`[EXOTEL] Voicebot request from: ${callerNumber}`);
+    const vapiWss = `wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}&vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}&customer_phone_number=${callerNumber}`;
 
-    return res.json({
-      url: `wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}`,
-      params: {
-        vapi_assistant_id: process.env.VAPI_ASSISTANT_ID,
-        customer_phone_number: callerNumber
-      }
-    });
+    return res.json({ url: vapiWss });
   } catch (err) {
     console.error('Voicebot error:', err);
     res.status(500).json({ error: 'Failed' });
   }
 });
 
-// Exotel webhook when a call comes in (Supports both GET and POST)
+// MAIN INCOMING ROUTE: For Exotel's "Passthru" or "Connect" Applets
 router.all('/incoming', async (req, res) => {
   try {
-    // Exotel can send data in Body (POST) or Query (URL/GET)
     const data = { ...req.query, ...req.body };
-    const { CallSid, From, To, ForwardedFrom, CallTo, CallFrom, Digits } = data;
-    
-    // Normalize parameter names (Exotel uses both From/CallFrom)
+    const { CallSid, From, To, CallFrom, CallTo, ForwardedFrom, Digits } = data;
+
     const callerNumber = From || CallFrom;
     const dialedNumber = To || CallTo;
 
-    console.log('[DEBUG] Incoming Call:', { callerNumber, dialedNumber, ForwardedFrom, Digits });
-    
-    let clinic = null;
+    console.log('[DEBUG] Incoming Call:', { callerNumber, dialedNumber, ForwardedFrom });
 
-    // 1. PRIMARY: Look for the doctor's number in 'ForwardedFrom'
+    let clinic = null;
     if (ForwardedFrom) {
-      const normalized = ForwardedFrom.replace(/\D/g, '').slice(-10);
-      console.log(`[DEBUG] Searching Firestore for ForwardedFrom (Normalized): ${normalized}`);
+      console.log(`[DEBUG] Searching by ForwardedFrom: ${ForwardedFrom}`);
       clinic = await getClinicByForwardedNumber(ForwardedFrom);
     }
-
-    // 2. SECONDARY: Look for the doctor's number in 'dialedNumber' (if it's a direct VN)
+    
     if (!clinic && dialedNumber) {
       const normalized = dialedNumber.replace(/\D/g, '').slice(-10);
-      console.log(`[DEBUG] Searching Firestore for DialedNumber (Normalized): ${normalized}`);
+      console.log(`[DEBUG] Searching by DialedNumber: ${normalized}`);
       clinic = await getClinicByForwardedNumber(dialedNumber);
     }
 
-    // 3. TERTIARY: Look for caller in case it's a known number
-    if (!clinic && callerNumber) {
-      clinic = await getClinicByForwardedNumber(callerNumber);
-    }
-
-    // 4. QUATERNARY: Fallback to PIN
-    if (!clinic && Digits) {
-      clinic = await getClinicByPin(Digits);
-    }
-    
     if (!clinic) {
-      console.log(`[ERROR] Clinic not found for number ${dialedNumber} or caller ${callerNumber}`);
+      console.log(`[ERROR] Clinic not found for number ${dialedNumber}`);
       return sendExoML(res, {
-        Say: "Welcome to Zeyphra Health. We couldn't identify the clinic for this call. Please ensure your number is registered.",
-        Hangup: ""
+        Say: "Welcome to Zeyphra Health. We couldn't identify the clinic. Please register your number."
       });
     }
 
-    console.log(`[SUCCESS] Clinic Identified: ${clinic.clinicName} (ID: ${clinic.id})`);
-
-    // Initialize conversation history
-    const initialHistory = [];
-    setSession(CallSid, { clinic, history: initialHistory, caller: callerNumber });
-
-    // Initial greeting
-    const greeting = `Hello! Welcome to ${clinic.clinicName}. I am ${clinic.aiName || 'your virtual assistant'}. How can I help you today?`;
-    console.log(`[DEBUG] Sending Greeting: ${greeting}`);
+    console.log(`[SUCCESS] Clinic Identified: ${clinic.clinicName}`);
     
-    // Log call start (Non-blocking to speed up response)
-    logCall(clinic.id, {
-      callSid: CallSid,
-      caller: callerNumber,
-      startTime: new Date().toISOString(),
+    // Store clinic info in session so AI remembers it
+    const session = { 
+      messages: [], 
+      clinicId: clinic.id, 
+      clinicName: clinic.clinicName,
+      doctorName: clinic.doctorName 
+    };
+    setSession(CallSid, session);
+
+    const greeting = `Hello! Welcome to ${clinic.clinicName}. I am Priya, your AI assistant. How can I help you today?`;
+
+    // Non-blocking log
+    logCall(CallSid, {
+      clinicId: clinic.id,
+      callerNumber,
       status: 'started'
     }).catch(err => console.error('[ERROR] logCall failed:', err.message));
 
-    console.log('[DEBUG] Returning TEST ExoML response (Say Only)');
-    return sendExoML(res, { Say: greeting });
+    return sendGather(res, greeting, clinic);
     
   } catch (err) {
     console.error('Incoming call error:', err);
-    res.status(500).send('Error');
+    return sendExoML(res, { Say: "Sorry, a technical error occurred." });
   }
 });
 
-// Exotel webhook when user speaks (Record/Gather completes)
-router.all('/gather', express.urlencoded({ extended: true }), async (req, res) => {
+// GATHER ROUTE: Handles AI conversation
+router.all('/gather', async (req, res) => {
   try {
     const data = { ...req.query, ...req.body };
-    const { CallSid, RecordingUrl } = data;
-    
-    const session = getSession(CallSid);
-    if (!session) {
-      return sendExoML(res, [{ Say: "Sorry, the session expired." }, { Hangup: "" }]);
-    }
-    
-    const { clinic, history, caller } = session;
+    const { CallSid, RecordingUrl, From, CallFrom } = data;
+    const callerNumber = From || CallFrom;
 
-    if (!RecordingUrl) {
-       return sendGather(res, "I'm sorry, I didn't catch that. Could you please repeat?", clinic);
-    }
+    console.log(`[DEBUG] Gather Event. Caller: ${callerNumber}`);
 
-    // 1. STT (Whisper)
-    const userText = await transcribeAudio(RecordingUrl);
-    console.log(`[USER] ${userText}`);
+    let session = getSession(CallSid) || { messages: [] };
+    const aiResponseText = await getAIResponse(RecordingUrl, session, callerNumber);
     
-    if (!userText || userText.length < 2) {
-       return sendGather(res, "I couldn't hear you clearly. Could you say that again?", clinic);
-    }
-
-    history.push({ role: 'user', content: userText });
-
-    // 2. Check Intent
-    const intent = await detectIntent(userText);
-    
-    if (intent === 'TRANSFER_TO_DOCTOR' && clinic.doctorMobile) {
-      const responseText = "Okay, transferring your call to the doctor now. Please wait.";
-      return sendExoML(res, {
-        Say: responseText,
-        Dial: clinic.doctorMobile
-      });
-    }
-
-    // 3. Generate AI Response
-    const aiResponseText = await generateAIResponse(history, clinic);
-    console.log(`[AI] ${aiResponseText}`);
-    
-    history.push({ role: 'assistant', content: aiResponseText });
     setSession(CallSid, session);
 
-    if (intent === 'GOODBYE' || aiResponseText.toLowerCase().includes('goodbye')) {
-        return sendExoML(res, {
-            Say: aiResponseText,
-            Hangup: ""
-        });
-    }
-
-    return sendGather(res, aiResponseText, clinic);
-
+    return sendGather(res, aiResponseText);
   } catch (err) {
     console.error('Gather error:', err);
-    return sendExoML(res, {
-      Say: "Ek minute please, kuch technical issue aa raha hai.",
-      Hangup: ""
-    });
+    return sendExoML(res, { Say: "Ek minute please, kuch technical issue aa raha hai." });
   }
 });
 
-// Helper to send Exotel ML (XML) for gathering input
-async function sendGather(res, text, clinic) {
-  let promptNode;
-  
-  if (process.env.USE_CUSTOM_TTS === 'true') {
-    try {
-      const audioUrl = await generateSpeechUrl(text, clinic.aiLanguage);
-      promptNode = { Play: audioUrl };
-    } catch (err) {
-      promptNode = { Say: text };
-    }
-  } else {
-      promptNode = { Say: text };
-  }
-
+function sendGather(res, text, clinic = null) {
   const baseUrl = process.env.BACKEND_URL.replace(/\/$/, '');
   
-  // Exotel expects a clean object structure for XML
   const exoml = {
-    ...promptNode,
+    Say: {
+      $: { voice: 'Polly.Aditi' },
+      _: text
+    },
     Record: {
       $: {
         action: `${baseUrl}/call/gather`,
@@ -216,7 +139,7 @@ async function sendGather(res, text, clinic) {
       }
     }
   };
-  
+
   return sendExoML(res, exoml);
 }
 
@@ -224,7 +147,16 @@ function sendExoML(res, instructions) {
   let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
   xml += '<Response>\n';
   
-  if (instructions.Say) xml += `  <Say>${instructions.Say}</Say>\n`;
+  if (instructions.Say) {
+    if (typeof instructions.Say === 'object') {
+      const voice = instructions.Say.$.voice;
+      const text = instructions.Say._;
+      xml += `  <Say voice="${voice}">${text}</Say>\n`;
+    } else {
+      xml += `  <Say>${instructions.Say}</Say>\n`;
+    }
+  }
+  
   if (instructions.Play) xml += `  <Play>${instructions.Play}</Play>\n`;
   if (instructions.Dial) xml += `  <Dial>${instructions.Dial}</Dial>\n`;
   if (instructions.Hangup !== undefined) xml += `  <Hangup></Hangup>\n`;
@@ -236,7 +168,7 @@ function sendExoML(res, instructions) {
   
   xml += '</Response>';
   
-  console.log('[DEBUG] Sending Final ExoML:\n', xml);
+  console.log('[DEBUG] Sending ExoML:\n', xml);
   res.set('Content-Type', 'application/xml');
   return res.status(200).send(xml);
 }
