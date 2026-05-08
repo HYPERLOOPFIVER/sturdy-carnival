@@ -21,7 +21,7 @@ wss.on('connection', async (ws, req) => {
         const vapiKey = process.env.VAPI_PRIVATE_KEY || process.env.VAPI_PUBLIC_KEY;
         const assistantId = process.env.VAPI_ASSISTANT_ID;
 
-        // 1. CREATE VAPI CALL FIRST (Modern Flow)
+        // 1. CREATE VAPI CALL
         console.log('[BRIDGE] Creating Vapi call...');
         const response = await fetch('https://api.vapi.ai/call', {
             method: 'POST',
@@ -31,9 +31,7 @@ wss.on('connection', async (ws, req) => {
             },
             body: JSON.stringify({
                 assistantId: assistantId,
-                transport: {
-                    provider: 'vapi.websocket'
-                }
+                transport: { provider: 'vapi.websocket' }
             })
         });
 
@@ -48,19 +46,28 @@ wss.on('connection', async (ws, req) => {
 
         console.log(`[BRIDGE] Connecting to: ${websocketUrl}`);
         
-        // 2. CONNECT TO DYNAMIC URL
+        // 2. CONNECT TO VAPI WEBSOCKET
         const vapiWs = new WebSocket(websocketUrl);
 
         vapiWs.on('open', () => {
             console.log('[BRIDGE] Connected to Vapi');
+            // START SESSION WITH CORRECT AUDIO CONFIG
+            vapiWs.send(JSON.stringify({
+                type: 'start',
+                assistantId: assistantId,
+                audio: {
+                    input: { encoding: 'mulaw', sampleRate: 8000 },
+                    output: { encoding: 'mulaw', sampleRate: 8000 }
+                }
+            }));
         });
 
-        // Pipe data: Exotel -> Vapi (Wrap in JSON)
+        // Pipe data: Exotel -> Vapi (Corrected Audio Type)
         ws.on('message', (data) => {
             if (vapiWs.readyState === WebSocket.OPEN) {
                 vapiWs.send(JSON.stringify({
-                    type: 'add-audio',
-                    audio: data.toString('base64')
+                    type: 'audio',
+                    data: Buffer.from(data).toString('base64')
                 }));
             }
         });
@@ -69,10 +76,15 @@ wss.on('connection', async (ws, req) => {
         vapiWs.on('message', (data) => {
             try {
                 const msg = JSON.parse(data.toString());
-                if (msg.type === 'audio-output' && ws.readyState === WebSocket.OPEN) {
-                    ws.send(Buffer.from(msg.audio, 'base64'));
+                
+                if (msg.type === 'audio' && ws.readyState === WebSocket.OPEN) {
+                    ws.send(Buffer.from(msg.data, 'base64'));
                 }
-            } catch (err) { /* Ignore non-JSON messages */ }
+                
+                if (msg.type !== 'audio') console.log('[VAPI MESSAGE]', msg.type);
+            } catch (err) {
+                // Ignore non-JSON messages
+            }
         });
 
         ws.on('close', () => {
@@ -99,13 +111,8 @@ app.use(express.json());
 
 // Initialize Services
 console.log('🔄 Starting service initialization...');
-try {
-    initFirebase();
-} catch (err) {}
-
-try {
-    initGroq();
-} catch (err) {}
+try { initFirebase(); } catch (err) {}
+try { initGroq(); } catch (err) {}
 
 // Routes
 app.use('/call', callRoutes);
