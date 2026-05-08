@@ -24,13 +24,15 @@ router.all('/incoming', express.urlencoded({ extended: true }), async (req, res)
 
     // 1. PRIMARY: Look for the doctor's number in 'ForwardedFrom'
     if (ForwardedFrom) {
-      console.log(`[DEBUG] Searching by ForwardedFrom: ${ForwardedFrom}`);
+      const normalized = ForwardedFrom.replace(/\D/g, '').slice(-10);
+      console.log(`[DEBUG] Searching Firestore for ForwardedFrom (Normalized): ${normalized}`);
       clinic = await getClinicByForwardedNumber(ForwardedFrom);
     }
 
     // 2. SECONDARY: Look for the doctor's number in 'dialedNumber' (if it's a direct VN)
     if (!clinic && dialedNumber) {
-      console.log(`[DEBUG] Searching by DialedNumber: ${dialedNumber}`);
+      const normalized = dialedNumber.replace(/\D/g, '').slice(-10);
+      console.log(`[DEBUG] Searching Firestore for DialedNumber (Normalized): ${normalized}`);
       clinic = await getClinicByForwardedNumber(dialedNumber);
     }
 
@@ -62,14 +64,15 @@ router.all('/incoming', express.urlencoded({ extended: true }), async (req, res)
     const greeting = `Hello! Welcome to ${clinic.clinicName}. I am ${clinic.aiName || 'your virtual assistant'}. How can I help you today?`;
     console.log(`[DEBUG] Sending Greeting: ${greeting}`);
     
-    // Log call start
-    await logCall(clinic.id, {
+    // Log call start (Non-blocking to speed up response)
+    logCall(clinic.id, {
       callSid: CallSid,
       caller: callerNumber,
       startTime: new Date().toISOString(),
       status: 'started'
-    });
+    }).catch(err => console.error('[ERROR] logCall failed:', err.message));
 
+    console.log('[DEBUG] Returning ExoML response');
     return sendGather(res, greeting, clinic);
     
   } catch (err) {
@@ -156,12 +159,13 @@ async function sendGather(res, text, clinic) {
       promptNode = { Say: text };
   }
 
+  const baseUrl = process.env.BACKEND_URL.replace(/\/$/, '');
   const exoml = [
     promptNode,
     {
       Record: {
         $: {
-          action: `${process.env.BACKEND_URL}/call/gather`,
+          action: `${baseUrl}/call/gather`,
           maxLength: 15,
           playBeep: true
         }
