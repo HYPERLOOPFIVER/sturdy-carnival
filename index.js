@@ -32,7 +32,7 @@ wss.on('connection', async (ws, req) => {
             body: JSON.stringify({
                 assistantId: assistantId,
                 transport: {
-                    provider: 'websocket'
+                    provider: 'vapi.websocket'
                 }
             })
         });
