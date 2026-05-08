@@ -59,12 +59,17 @@ wss.on('connection', async (ws, req) => {
             }));
         });
 
-        // 2. EXOTEL -> VAPI (PURE JSON EVENTS)
+        // 2. EXOTEL -> VAPI
+        let streamSid = null;
+
         ws.on('message', (message) => {
             try {
                 const packet = JSON.parse(message.toString());
                 
-                if (packet.event === 'start') console.log('[EXOTEL] Stream started');
+                if (packet.event === 'start') {
+                    streamSid = packet.start.streamSid;
+                    console.log(`[EXOTEL] Stream started: ${streamSid}`);
+                }
                 
                 if (packet.event === 'media' && vapiWs.readyState === WebSocket.OPEN) {
                     vapiWs.send(JSON.stringify({
@@ -77,21 +82,20 @@ wss.on('connection', async (ws, req) => {
                     console.log('[EXOTEL] Stream stopped');
                     if (vapiWs.readyState === WebSocket.OPEN) vapiWs.close();
                 }
-            } catch (err) {
-                // Ignore non-JSON
-            }
+            } catch (err) {}
         });
 
-        // 3. VAPI -> EXOTEL (PURE JSON EVENTS)
+        // 3. VAPI -> EXOTEL (WITH STREAMSID)
         vapiWs.on('message', (data, isBinary) => {
-            if (isBinary) return; // Ignore binary if any comes
+            if (isBinary) return;
 
             try {
                 const msg = JSON.parse(data.toString());
                 
-                if (msg.type === 'audio' && ws.readyState === WebSocket.OPEN) {
+                if (msg.type === 'audio' && ws.readyState === WebSocket.OPEN && streamSid) {
                     ws.send(JSON.stringify({
                         event: 'media',
+                        streamSid: streamSid,
                         media: {
                             payload: msg.data
                         }
