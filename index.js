@@ -15,15 +15,14 @@ const wss = new WebSocketServer({ server });
 
 // WebSocket Bridge: Exotel <-> Railway <-> Vapi
 wss.on('connection', (ws, req) => {
-  if (req.url.includes('/call/ws-bridge')) {
-    console.log('[BRIDGE] Exotel connected');
+    console.log('[BRIDGE] Connection attempt detected...');
     
     console.log('[BRIDGE] Connecting to Vapi...');
     const vapiKey = process.env.VAPI_PRIVATE_KEY;
     
-    const vapiWs = new WebSocket('wss://api.vapi.ai/', {
+    const vapiWs = new WebSocket('wss://api.vapi.ai', {
       headers: {
-        Authorization: `Bearer ${vapiKey}`,
+        Authorization: `Bearer ${vapiKey}`
       }
     });
 

@@ -35,7 +35,15 @@ router.all('/voicebot', async (req, res) => {
     }
 
     const callerNumber = data.From || data.CallFrom;
-    console.log(`[EXOTEL] Bridge request for: ${callerNumber}`);
+    console.log(`[EXOTEL] Success! Pointing to Root Bridge for: ${callerNumber}`);
+
+    // Pointing to the absolute ROOT for the WebSocket
+    const bridgeUrl = `wss://sturdy-carnival-production.up.railway.app/?vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}`;
+
+    return res.json({
+      url: bridgeUrl,
+      websocket_url: bridgeUrl
+    });
 
 // TEST ROUTE: To see if Exotel can even hear our server
 router.all('/test-voice', (req, res) => {
