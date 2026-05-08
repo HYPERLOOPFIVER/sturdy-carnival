@@ -18,19 +18,42 @@ wss.on('connection', (ws, req) => {
   if (req.url.includes('/call/ws-bridge')) {
     console.log('[BRIDGE] Exotel connected');
     
-    // Connect to Vapi securely
-    const vapiWs = new WebSocket(`wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}&vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}`);
-
-    vapiWs.on('open', () => console.log('[BRIDGE] Connected to Vapi'));
-    
-    // Pipe data: Exotel -> Vapi
-    ws.on('message', (data) => {
-      if (vapiWs.readyState === WebSocket.OPEN) vapiWs.send(data);
+    // Connect to Vapi securely using headers
+    const vapiWs = new WebSocket('wss://api.vapi.ai/api/v1/stream', {
+      headers: {
+        Authorization: `Bearer ${process.env.VAPI_PUBLIC_KEY}`
+      }
     });
 
-    // Pipe data: Vapi -> Exotel
+    vapiWs.on('open', () => {
+      console.log('[BRIDGE] Connected to Vapi');
+      // Send the assistant ID as the first message
+      vapiWs.send(JSON.stringify({
+        type: 'start-conversation',
+        assistantId: process.env.VAPI_ASSISTANT_ID
+      }));
+    });
+    
+    // Pipe data: Exotel -> Vapi (Wrap in JSON)
+    ws.on('message', (data) => {
+      if (vapiWs.readyState === WebSocket.OPEN) {
+        vapiWs.send(JSON.stringify({
+          type: 'add-audio',
+          audio: data.toString('base64')
+        }));
+      }
+    });
+
+    // Pipe data: Vapi -> Exotel (Unwrap from JSON)
     vapiWs.on('message', (data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === 'audio-output' && ws.readyState === WebSocket.OPEN) {
+          ws.send(Buffer.from(msg.audio, 'base64'));
+        }
+      } catch (err) {
+        // Ignore non-JSON messages (like raw audio if Vapi sends it)
+      }
     });
 
     ws.on('close', () => {
