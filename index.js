@@ -96,7 +96,7 @@ wss.on('connection', async (ws, req) => {
                 if (msg.type === 'audio' && ws.readyState === WebSocket.OPEN && streamSid) {
                     ws.send(JSON.stringify({
                         event: 'media',
-                        streamSid: streamSid,
+                        stream_sid: streamSid,
                         media: {
                             payload: msg.data
                         }
