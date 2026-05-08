@@ -17,17 +17,21 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws, req) => {
     console.log('[BRIDGE] Connection attempt detected...');
     
-    // THE RECOVERY HANDSHAKE
     const vapiKey = process.env.VAPI_PRIVATE_KEY || process.env.VAPI_PUBLIC_KEY;
     const assistantId = process.env.VAPI_ASSISTANT_ID;
 
-    console.log(`[BRIDGE] Auth check: Key starts with ${vapiKey?.substring(0,4)}, Assistant starts with ${assistantId?.substring(0,4)}`);
+    // Use the exact URL provided
+    const vapiWs = new WebSocket(`wss://api.vapi.ai/api/v1/call/websocket?apiKey=${vapiKey}`);
 
-    const vapiWs = new WebSocket(`wss://api.vapi.ai/v1/stream?vapi_public_key=${vapiKey}`, {
-        headers: { Authorization: `Bearer ${vapiKey}` }
+    vapiWs.on('open', () => {
+        console.log('[BRIDGE] Connected to Vapi');
+        vapiWs.send(JSON.stringify({
+            type: 'start',
+            assistantId: assistantId
+        }));
     });
 
-    // Pipe data: Exotel -> Vapi
+    // Pipe data: Exotel -> Vapi (Wrap in JSON)
     ws.on('message', (data) => {
         if (vapiWs.readyState === WebSocket.OPEN) {
             vapiWs.send(JSON.stringify({
@@ -37,7 +41,7 @@ wss.on('connection', (ws, req) => {
         }
     });
 
-    // Pipe data: Vapi -> Exotel
+    // Pipe data: Vapi -> Exotel (Unwrap from JSON)
     vapiWs.on('message', (data) => {
         try {
             const msg = JSON.parse(data.toString());
