@@ -177,22 +177,23 @@ async function sendGather(res, text, clinic) {
 }
 
 function sendExoML(res, instructions) {
-  let xml = '<Response>\n';
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+  xml += '<Response>\n';
   
   if (instructions.Say) xml += `  <Say>${instructions.Say}</Say>\n`;
   if (instructions.Play) xml += `  <Play>${instructions.Play}</Play>\n`;
   if (instructions.Dial) xml += `  <Dial>${instructions.Dial}</Dial>\n`;
-  if (instructions.Hangup !== undefined) xml += `  <Hangup/>\n`;
+  if (instructions.Hangup !== undefined) xml += `  <Hangup></Hangup>\n`;
   
   if (instructions.Record) {
     const { action, maxLength, playBeep } = instructions.Record.$;
-    xml += `  <Record action="${action}" maxLength="${maxLength}" playBeep="${playBeep}" />\n`;
+    xml += `  <Record action="${action}" maxLength="${maxLength}" playBeep="${playBeep}"></Record>\n`;
   }
   
   xml += '</Response>';
   
-  console.log('[DEBUG] Sending ExoML:\n', xml);
-  res.set('Content-Type', 'text/xml');
+  console.log('[DEBUG] Sending Final ExoML:\n', xml);
+  res.set('Content-Type', 'application/xml');
   return res.status(200).send(xml);
 }
 
