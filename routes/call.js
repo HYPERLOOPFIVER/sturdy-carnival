@@ -177,11 +177,23 @@ async function sendGather(res, text, clinic) {
 }
 
 function sendExoML(res, instructions) {
-  // Use headless: true and a clean object to match ExoML requirements
-  const xml = builder.buildObject(instructions);
-  console.log('[DEBUG] Generated ExoML:', xml); // Log this so we can verify the XML
-  res.header('Content-Type', 'text/xml');
-  res.send(xml);
+  let xml = '<Response>\n';
+  
+  if (instructions.Say) xml += `  <Say>${instructions.Say}</Say>\n`;
+  if (instructions.Play) xml += `  <Play>${instructions.Play}</Play>\n`;
+  if (instructions.Dial) xml += `  <Dial>${instructions.Dial}</Dial>\n`;
+  if (instructions.Hangup !== undefined) xml += `  <Hangup/>\n`;
+  
+  if (instructions.Record) {
+    const { action, maxLength, playBeep } = instructions.Record.$;
+    xml += `  <Record action="${action}" maxLength="${maxLength}" playBeep="${playBeep}" />\n`;
+  }
+  
+  xml += '</Response>';
+  
+  console.log('[DEBUG] Sending ExoML:\n', xml);
+  res.set('Content-Type', 'text/xml');
+  return res.status(200).send(xml);
 }
 
 export default router;
