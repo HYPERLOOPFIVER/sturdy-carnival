@@ -17,17 +17,11 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws, req) => {
     console.log('[BRIDGE] Connection attempt detected...');
     
-    // The absolute correct Vapi WebSocket URL
-    const vapiWs = new WebSocket(`wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}`, {
-        headers: { Authorization: `Bearer ${process.env.VAPI_PRIVATE_KEY || process.env.VAPI_PUBLIC_KEY}` }
-    });
+    // THE OFFICIAL VAPI EXOTEL ENDPOINT
+    const vapiWs = new WebSocket(`wss://api.vapi.ai/exotel?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}&vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}`);
 
     vapiWs.on('open', () => {
-        console.log('[BRIDGE] Connected to Vapi');
-        vapiWs.send(JSON.stringify({
-            type: 'start-conversation',
-            assistantId: process.env.VAPI_ASSISTANT_ID
-        }));
+        console.log('[BRIDGE] SUCCESS! Connected to Vapi Exotel Node');
     });
 
     // Pipe data: Exotel -> Vapi
