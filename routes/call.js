@@ -48,10 +48,10 @@ router.all('/incoming', express.urlencoded({ extended: true }), async (req, res)
     
     if (!clinic) {
       console.log(`[ERROR] Clinic not found for number ${dialedNumber} or caller ${callerNumber}`);
-      return sendExoML(res, [
-        { Say: "Welcome to Zeyphra Health. We couldn't identify the clinic for this call. Please ensure your number is registered." },
-        { Hangup: "" }
-      ]);
+      return sendExoML(res, {
+        Say: "Welcome to Zeyphra Health. We couldn't identify the clinic for this call. Please ensure your number is registered.",
+        Hangup: ""
+      });
     }
 
     console.log(`[SUCCESS] Clinic Identified: ${clinic.clinicName} (ID: ${clinic.id})`);
@@ -113,10 +113,10 @@ router.all('/gather', express.urlencoded({ extended: true }), async (req, res) =
     
     if (intent === 'TRANSFER_TO_DOCTOR' && clinic.doctorMobile) {
       const responseText = "Okay, transferring your call to the doctor now. Please wait.";
-      return sendExoML(res, [
-        { Say: responseText },
-        { Dial: clinic.doctorMobile }
-      ]);
+      return sendExoML(res, {
+        Say: responseText,
+        Dial: clinic.doctorMobile
+      });
     }
 
     // 3. Generate AI Response
@@ -127,20 +127,20 @@ router.all('/gather', express.urlencoded({ extended: true }), async (req, res) =
     setSession(CallSid, session);
 
     if (intent === 'GOODBYE' || aiResponseText.toLowerCase().includes('goodbye')) {
-        return sendExoML(res, [
-            { Say: aiResponseText },
-            { Hangup: "" }
-        ]);
+        return sendExoML(res, {
+            Say: aiResponseText,
+            Hangup: ""
+        });
     }
 
     return sendGather(res, aiResponseText, clinic);
 
   } catch (err) {
     console.error('Gather error:', err);
-    return sendExoML(res, [
-      { Say: "Ek minute please, kuch technical issue aa raha hai." },
-      { Hangup: "" }
-    ]);
+    return sendExoML(res, {
+      Say: "Ek minute please, kuch technical issue aa raha hai.",
+      Hangup: ""
+    });
   }
 });
 
@@ -160,24 +160,26 @@ async function sendGather(res, text, clinic) {
   }
 
   const baseUrl = process.env.BACKEND_URL.replace(/\/$/, '');
-  const exoml = [
-    promptNode,
-    {
-      Record: {
-        $: {
-          action: `${baseUrl}/call/gather`,
-          maxLength: 15,
-          playBeep: true
-        }
+  
+  // Exotel expects a clean object structure for XML
+  const exoml = {
+    ...promptNode,
+    Record: {
+      $: {
+        action: `${baseUrl}/call/gather`,
+        maxLength: 15,
+        playBeep: true
       }
     }
-  ];
+  };
   
   return sendExoML(res, exoml);
 }
 
 function sendExoML(res, instructions) {
+  // Use headless: true and a clean object to match ExoML requirements
   const xml = builder.buildObject(instructions);
+  console.log('[DEBUG] Generated ExoML:', xml); // Log this so we can verify the XML
   res.header('Content-Type', 'text/xml');
   res.send(xml);
 }
