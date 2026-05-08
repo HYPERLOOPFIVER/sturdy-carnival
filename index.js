@@ -38,17 +38,18 @@ wss.on('connection', async (ws, req) => {
         });
 
         const callData = await response.json();
+        const websocketUrl = callData.transport?.websocketCallUrl;
         
-        if (!callData.websocketCallUrl) {
+        if (!websocketUrl) {
             console.error('[BRIDGE] Vapi failed to provide WebSocket URL:', callData);
             ws.close();
             return;
         }
 
-        console.log('[BRIDGE] Dynamic URL obtained. Connecting...');
+        console.log(`[BRIDGE] Connecting to: ${websocketUrl}`);
         
         // 2. CONNECT TO DYNAMIC URL
-        const vapiWs = new WebSocket(callData.websocketCallUrl);
+        const vapiWs = new WebSocket(websocketUrl);
 
         vapiWs.on('open', () => {
             console.log('[BRIDGE] Connected to Vapi');
