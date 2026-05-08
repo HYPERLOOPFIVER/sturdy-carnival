@@ -41,13 +41,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Start server (Only for local dev/Railway, not for Vercel)
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  const PORT = process.env.PORT || 8080;
-  server.listen(PORT, () => {
-    console.log(`🚀 Zeyphra Call AI Backend running on port ${PORT}`);
-  });
-}
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Zeyphra Call AI Backend running on port ${PORT}`);
+});
 
 // Export for Vercel
 export default app;
