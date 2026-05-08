@@ -59,42 +59,53 @@ wss.on('connection', async (ws, req) => {
             }));
         });
 
-        // 2. EXOTEL -> VAPI
-        ws.on('message', (message, isBinary) => {
-            if (isBinary) {
-                // Pass raw audio directly
-                if (vapiWs.readyState === WebSocket.OPEN) vapiWs.send(message);
-                return;
-            }
-            
+        // 2. EXOTEL -> VAPI (PURE JSON EVENTS)
+        ws.on('message', (message) => {
             try {
                 const packet = JSON.parse(message.toString());
+                
+                if (packet.event === 'start') console.log('[EXOTEL] Stream started');
+                
                 if (packet.event === 'media' && vapiWs.readyState === WebSocket.OPEN) {
-                    vapiWs.send(Buffer.from(packet.media.payload, 'base64'));
+                    vapiWs.send(JSON.stringify({
+                        type: 'audio',
+                        data: packet.media.payload
+                    }));
+                }
+
+                if (packet.event === 'stop') {
+                    console.log('[EXOTEL] Stream stopped');
+                    if (vapiWs.readyState === WebSocket.OPEN) vapiWs.close();
                 }
             } catch (err) {
-                // Optional text event handling
+                // Ignore non-JSON
             }
         });
 
-        // 3. VAPI -> EXOTEL
+        // 3. VAPI -> EXOTEL (PURE JSON EVENTS)
         vapiWs.on('message', (data, isBinary) => {
-            if (isBinary) {
-                // Pass binary audio directly to Exotel
-                if (ws.readyState === WebSocket.OPEN) ws.send(data);
-                return;
-            }
+            if (isBinary) return; // Ignore binary if any comes
 
             try {
                 const msg = JSON.parse(data.toString());
-                console.log('[VAPI MESSAGE]', msg.type);
                 
-                // If Vapi sends audio as JSON (fallback)
                 if (msg.type === 'audio' && ws.readyState === WebSocket.OPEN) {
-                    ws.send(Buffer.from(msg.data, 'base64'));
+                    ws.send(JSON.stringify({
+                        event: 'media',
+                        media: {
+                            payload: msg.data
+                        }
+                    }));
+                }
+
+                if (msg.type !== 'audio') console.log('[VAPI MESSAGE]', msg.type);
+
+                if (msg.type === 'hangup') {
+                    console.log('[VAPI] Hangup');
+                    ws.close();
                 }
             } catch (err) {
-                console.error('[VAPI JSON ERROR]', err.message);
+                console.error('[VAPI ERROR]', err.message);
             }
         });
 
