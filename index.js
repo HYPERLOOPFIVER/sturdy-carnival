@@ -67,8 +67,9 @@ wss.on('connection', async (ws, req) => {
                 const packet = JSON.parse(message.toString());
                 
                 if (packet.event === 'start') {
-                    streamSid = packet.start.streamSid;
-                    console.log(`[EXOTEL] Stream started: ${streamSid}`);
+                    console.log('[EXOTEL START PACKET]', JSON.stringify(packet, null, 2));
+                    streamSid = packet.start?.streamSid || packet.stream_sid || packet.start?.stream_sid;
+                    console.log(`[EXOTEL] Identified StreamSid: ${streamSid}`);
                 }
                 
                 if (packet.event === 'media' && vapiWs.readyState === WebSocket.OPEN) {
