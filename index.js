@@ -19,9 +19,9 @@ wss.on('connection', (ws, req) => {
     console.log('[BRIDGE] Exotel connected');
     
     console.log('[BRIDGE] Connecting to Vapi...');
-    const vapiKey = process.env.VAPI_PRIVATE_KEY || process.env.VAPI_PUBLIC_KEY;
+    const vapiKey = process.env.VAPI_PRIVATE_KEY;
     
-    const vapiWs = new WebSocket('wss://api.vapi.ai/api/v1/stream', {
+    const vapiWs = new WebSocket('wss://api.vapi.ai/', {
       headers: {
         Authorization: `Bearer ${vapiKey}`,
       }
