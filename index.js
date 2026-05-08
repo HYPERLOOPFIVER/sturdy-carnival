@@ -17,9 +17,9 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws, req) => {
     console.log('[BRIDGE] Connection attempt detected...');
     
-    const vapiKey = process.env.VAPI_PRIVATE_KEY;
-    const vapiWs = new WebSocket('wss://api.vapi.ai', {
-        headers: { Authorization: `Bearer ${vapiKey}` }
+    // The absolute correct Vapi WebSocket URL
+    const vapiWs = new WebSocket(`wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}`, {
+        headers: { Authorization: `Bearer ${process.env.VAPI_PRIVATE_KEY || process.env.VAPI_PUBLIC_KEY}` }
     });
 
     vapiWs.on('open', () => {
