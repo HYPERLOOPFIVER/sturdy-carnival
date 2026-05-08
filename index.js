@@ -10,15 +10,45 @@ import callRoutes from './routes/call.js';
 dotenv.config();
 
 const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+// WebSocket Bridge: Exotel <-> Railway <-> Vapi
+wss.on('connection', (ws, req) => {
+  if (req.url.includes('/call/ws-bridge')) {
+    console.log('[BRIDGE] Exotel connected');
+    
+    // Connect to Vapi securely
+    const vapiWs = new WebSocket(`wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}&vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}`);
+
+    vapiWs.on('open', () => console.log('[BRIDGE] Connected to Vapi'));
+    
+    // Pipe data: Exotel -> Vapi
+    ws.on('message', (data) => {
+      if (vapiWs.readyState === WebSocket.OPEN) vapiWs.send(data);
+    });
+
+    // Pipe data: Vapi -> Exotel
+    vapiWs.on('message', (data) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    });
+
+    ws.on('close', () => {
+      console.log('[BRIDGE] Exotel disconnected');
+      vapiWs.close();
+    });
+
+    vapiWs.on('close', () => ws.close());
+    vapiWs.on('error', (err) => console.error('[BRIDGE] Vapi Error:', err));
+  }
+});
 
 // Middleware
 app.use(cors());
-app.use(express.json()); // For standard JSON payloads
-// Note: callRoutes uses express.urlencoded internally because Exotel sends x-www-form-urlencoded
+app.use(express.json());
 
 // Initialize Services
 console.log('🔄 Starting service initialization...');
-
 try {
   initFirebase();
   console.log('✅ Firebase Admin: Initialized successfully');
@@ -46,5 +76,4 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Zeyphra Call AI Backend running on port ${PORT}`);
 });
 
-// Export for Vercel
 export default app;
