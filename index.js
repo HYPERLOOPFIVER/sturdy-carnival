@@ -18,17 +18,21 @@ wss.on('connection', (ws, req) => {
   if (req.url.includes('/call/ws-bridge')) {
     console.log('[BRIDGE] Exotel connected');
     
-    // Connect to Vapi with Private Key for server-to-server auth
+    console.log('[BRIDGE] Connecting to Vapi...');
     const vapiKey = process.env.VAPI_PRIVATE_KEY || process.env.VAPI_PUBLIC_KEY;
+    
     const vapiWs = new WebSocket('wss://api.vapi.ai/api/v1/stream', {
       headers: {
         Authorization: `Bearer ${vapiKey}`,
-        Origin: 'https://api.vapi.ai'
       }
     });
 
+    vapiWs.on('upgrade', (res) => {
+      console.log(`[BRIDGE] Vapi Handshake status: ${res.statusCode}`);
+    });
+
     vapiWs.on('open', () => {
-      console.log('[BRIDGE] Connected to Vapi');
+      console.log('[BRIDGE] Successfully Connected to Vapi!');
       vapiWs.send(JSON.stringify({
         type: 'start-conversation',
         assistantId: process.env.VAPI_ASSISTANT_ID
