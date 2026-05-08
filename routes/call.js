@@ -72,8 +72,8 @@ router.all('/incoming', express.urlencoded({ extended: true }), async (req, res)
       status: 'started'
     }).catch(err => console.error('[ERROR] logCall failed:', err.message));
 
-    console.log('[DEBUG] Returning ExoML response');
-    return sendGather(res, greeting, clinic);
+    console.log('[DEBUG] Returning TEST ExoML response (Say Only)');
+    return sendExoML(res, { Say: greeting });
     
   } catch (err) {
     console.error('Incoming call error:', err);
