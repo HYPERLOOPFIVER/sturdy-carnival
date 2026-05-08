@@ -7,50 +7,52 @@ import xml2js from 'xml2js';
 const router = express.Router();
 const builder = new xml2js.Builder({ rootName: 'Response', headless: true });
 
+// Middleware to handle both JSON (Vapi) and Form-Encoded (Exotel)
+router.use(express.json());
+router.use(express.urlencoded({ extended: true }));
+
 // VOICEBOT ROUTE: For Exotel's "Voicebot" Applet (Real-time AI)
+// VOICEBOT ROUTE: Handles BOTH Exotel's initial request AND Vapi's assistant-request
 router.all('/voicebot', async (req, res) => {
   try {
     const data = { ...req.query, ...req.body };
-    const { CallSid, From, CallFrom, ForwardedFrom } = data;
-    const callerNumber = From || CallFrom;
     
-    console.log(`[VOICEBOT] Incoming request for: ${callerNumber}, ForwardedFrom: ${ForwardedFrom}`);
-
-    // 1. Look up the clinic (Dynamic Doctor Logic!)
-    let clinic = null;
-    if (ForwardedFrom) clinic = await getClinicByForwardedNumber(ForwardedFrom);
-    if (!clinic) clinic = await getClinicByForwardedNumber(callerNumber);
-    
-    // Fallback if no clinic found
-    const clinicName = clinic ? clinic.clinicName : "Zeyphra Health";
-    const doctorName = clinic ? clinic.doctorName : "the Doctor";
-    const systemPrompt = clinic 
-      ? `You are ${clinic.aiName || 'Priya'}, the AI assistant for ${clinicName}. Doctor is ${doctorName}. Be warm and helpful. Speak in Hinglish.`
-      : "You are a helpful medical assistant for Zeyphra Health. How can I help?";
-
-    // 2. Return the JSON with Dynamic Overrides
-    return res.json({
-      url: "wss://api.vapi.ai/api/v1/stream", 
-      params: {
-        vapi_public_key: process.env.VAPI_PUBLIC_KEY,
-        vapi_assistant_id: process.env.VAPI_ASSISTANT_ID,
-        // DYNAMIC OVERRIDE: This makes the AI act like the specific doctor!
-        assistant_override: {
-          name: clinic ? clinic.aiName : "Priya",
+    // 1. Handle Vapi's request for assistant config
+    if (data.message && data.message.type === 'assistant-request') {
+      const callerNumber = data.message.call.customer.number;
+      console.log(`[VAPI] Dynamic prompt request for: ${callerNumber}`);
+      
+      let clinic = await getClinicByForwardedNumber(callerNumber);
+      const clinicName = clinic ? clinic.clinicName : "Zeyphra Health";
+      
+      return res.json({
+        assistant: {
           model: {
-             messages: [{ role: "system", content: systemPrompt }]
+            messages: [{ role: "system", content: `You are Priya for ${clinicName}. Speak Hinglish.` }]
           }
         }
+      });
+    }
+
+    // 2. Handle Exotel's initial request (Return the WSS URL)
+    const callerNumber = data.From || data.CallFrom;
+    console.log(`[EXOTEL] Voicebot request from: ${callerNumber}`);
+
+    return res.json({
+      url: `wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}`,
+      params: {
+        vapi_assistant_id: process.env.VAPI_ASSISTANT_ID,
+        customer_phone_number: callerNumber
       }
     });
   } catch (err) {
     console.error('Voicebot error:', err);
-    res.status(500).json({ error: 'Failed to connect bot' });
+    res.status(500).json({ error: 'Failed' });
   }
 });
 
 // Exotel webhook when a call comes in (Supports both GET and POST)
-router.all('/incoming', express.urlencoded({ extended: true }), async (req, res) => {
+router.all('/incoming', async (req, res) => {
   try {
     // Exotel can send data in Body (POST) or Query (URL/GET)
     const data = { ...req.query, ...req.body };
