@@ -37,13 +37,11 @@ router.all('/voicebot', async (req, res) => {
     const callerNumber = data.From || data.CallFrom;
     console.log(`[EXOTEL] Bridge request for: ${callerNumber}`);
 
-    // This URL points to OUR OWN server bridge
-    const bridgeUrl = `wss://sturdy-carnival-production.up.railway.app/call/ws-bridge?vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}&customer_phone_number=${callerNumber}`;
-
-    return res.json({
-      url: bridgeUrl,
-      websocket_url: bridgeUrl
-    });
+// TEST ROUTE: To see if Exotel can even hear our server
+router.all('/test-voice', (req, res) => {
+  console.log('[DEBUG] Test Voice Request Received');
+  return sendExoML(res, { Say: "Hello! If you hear this, our server is connected to Exotel." });
+});
   } catch (err) {
     console.error('Voicebot error:', err);
     res.status(500).json({ error: 'Failed' });
