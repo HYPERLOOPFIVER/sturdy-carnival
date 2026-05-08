@@ -59,39 +59,42 @@ wss.on('connection', async (ws, req) => {
             }));
         });
 
-        // 2. EXOTEL -> VAPI (UNWRAP JSON)
-        ws.on('message', (message) => {
+        // 2. EXOTEL -> VAPI
+        ws.on('message', (message, isBinary) => {
+            if (isBinary) {
+                // Pass raw audio directly
+                if (vapiWs.readyState === WebSocket.OPEN) vapiWs.send(message);
+                return;
+            }
+            
             try {
                 const packet = JSON.parse(message.toString());
-                
                 if (packet.event === 'media' && vapiWs.readyState === WebSocket.OPEN) {
-                    vapiWs.send(JSON.stringify({
-                        type: 'audio',
-                        data: packet.media.payload
-                    }));
+                    vapiWs.send(Buffer.from(packet.media.payload, 'base64'));
                 }
             } catch (err) {
-                // Not an Exotel media event
+                // Optional text event handling
             }
         });
 
-        // 3. VAPI -> EXOTEL (WRAP IN JSON)
-        vapiWs.on('message', (data) => {
+        // 3. VAPI -> EXOTEL
+        vapiWs.on('message', (data, isBinary) => {
+            if (isBinary) {
+                // Pass binary audio directly to Exotel
+                if (ws.readyState === WebSocket.OPEN) ws.send(data);
+                return;
+            }
+
             try {
                 const msg = JSON.parse(data.toString());
+                console.log('[VAPI MESSAGE]', msg.type);
                 
+                // If Vapi sends audio as JSON (fallback)
                 if (msg.type === 'audio' && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        event: 'media',
-                        media: {
-                            payload: msg.data
-                        }
-                    }));
+                    ws.send(Buffer.from(msg.data, 'base64'));
                 }
-                
-                if (msg.type !== 'audio') console.log('[VAPI MESSAGE]', msg.type);
             } catch (err) {
-                console.error('[VAPI ERROR]', err.message);
+                console.error('[VAPI JSON ERROR]', err.message);
             }
         });
 
