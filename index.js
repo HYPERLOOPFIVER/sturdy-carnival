@@ -44,14 +44,11 @@ wss.on('connection', async (ws, req) => {
             return;
         }
 
-        console.log(`[BRIDGE] Connecting to: ${websocketUrl}`);
-        
-        // 2. CONNECT TO VAPI WEBSOCKET
+        console.log(`[BRIDGE] Connecting to Vapi: ${websocketUrl}`);
         const vapiWs = new WebSocket(websocketUrl);
 
         vapiWs.on('open', () => {
             console.log('[BRIDGE] Connected to Vapi');
-            // START SESSION WITH CORRECT AUDIO CONFIG
             vapiWs.send(JSON.stringify({
                 type: 'start',
                 assistantId: assistantId,
@@ -62,28 +59,39 @@ wss.on('connection', async (ws, req) => {
             }));
         });
 
-        // Pipe data: Exotel -> Vapi (Corrected Audio Type)
-        ws.on('message', (data) => {
-            if (vapiWs.readyState === WebSocket.OPEN) {
-                vapiWs.send(JSON.stringify({
-                    type: 'audio',
-                    data: Buffer.from(data).toString('base64')
-                }));
+        // 2. EXOTEL -> VAPI (UNWRAP JSON)
+        ws.on('message', (message) => {
+            try {
+                const packet = JSON.parse(message.toString());
+                
+                if (packet.event === 'media' && vapiWs.readyState === WebSocket.OPEN) {
+                    vapiWs.send(JSON.stringify({
+                        type: 'audio',
+                        data: packet.media.payload
+                    }));
+                }
+            } catch (err) {
+                // Not an Exotel media event
             }
         });
 
-        // Pipe data: Vapi -> Exotel (Unwrap from JSON)
+        // 3. VAPI -> EXOTEL (WRAP IN JSON)
         vapiWs.on('message', (data) => {
             try {
                 const msg = JSON.parse(data.toString());
                 
                 if (msg.type === 'audio' && ws.readyState === WebSocket.OPEN) {
-                    ws.send(Buffer.from(msg.data, 'base64'));
+                    ws.send(JSON.stringify({
+                        event: 'media',
+                        media: {
+                            payload: msg.data
+                        }
+                    }));
                 }
                 
                 if (msg.type !== 'audio') console.log('[VAPI MESSAGE]', msg.type);
             } catch (err) {
-                // Ignore non-JSON messages
+                console.error('[VAPI ERROR]', err.message);
             }
         });
 
@@ -100,7 +108,7 @@ wss.on('connection', async (ws, req) => {
         vapiWs.on('error', (err) => console.error('[BRIDGE] Vapi Error:', err));
 
     } catch (err) {
-        console.error('[BRIDGE] Bridge Error:', err.message);
+        console.error('[BRIDGE] Error:', err.message);
         ws.close();
     }
 });
@@ -110,7 +118,6 @@ app.use(cors());
 app.use(express.json());
 
 // Initialize Services
-console.log('🔄 Starting service initialization...');
 try { initFirebase(); } catch (err) {}
 try { initGroq(); } catch (err) {}
 
