@@ -45,12 +45,14 @@ router.all('/incoming', express.urlencoded({ extended: true }), async (req, res)
     }
     
     if (!clinic) {
-      console.log(`[ERROR] Clinic not found. From: ${From}, ForwardedFrom: ${ForwardedFrom}, Digits: ${Digits}`);
+      console.log(`[ERROR] Clinic not found for number ${dialedNumber} or caller ${callerNumber}`);
       return sendExoML(res, [
         { Say: "Welcome to Zeyphra Health. We couldn't identify the clinic for this call. Please ensure your number is registered." },
         { Hangup: "" }
       ]);
     }
+
+    console.log(`[SUCCESS] Clinic Identified: ${clinic.clinicName} (ID: ${clinic.id})`);
 
     // Initialize conversation history
     const initialHistory = [];
@@ -58,6 +60,7 @@ router.all('/incoming', express.urlencoded({ extended: true }), async (req, res)
 
     // Initial greeting
     const greeting = `Hello! Welcome to ${clinic.clinicName}. I am ${clinic.aiName || 'your virtual assistant'}. How can I help you today?`;
+    console.log(`[DEBUG] Sending Greeting: ${greeting}`);
     
     // Log call start
     await logCall(clinic.id, {
