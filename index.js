@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import http from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
 import { initFirebase } from './services/firebase.js';
 import { initGroq } from './services/groq.js';
 import callRoutes from './routes/call.js';
@@ -41,8 +43,8 @@ app.get('/health', (req, res) => {
 
 // Start server (Only for local dev/Railway, not for Vercel)
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  const PORT = process.env.PORT || 3001;
-  app.listen(PORT, () => {
+  const PORT = process.env.PORT || 8080;
+  server.listen(PORT, () => {
     console.log(`🚀 Zeyphra Call AI Backend running on port ${PORT}`);
   });
 }

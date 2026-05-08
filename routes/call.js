@@ -35,22 +35,14 @@ router.all('/voicebot', async (req, res) => {
     }
 
     const callerNumber = data.From || data.CallFrom;
-    console.log(`[EXOTEL] Success! Fetching WSS for: ${callerNumber}`);
+    console.log(`[EXOTEL] Bridge request for: ${callerNumber}`);
 
-    const fullUrl = `wss://api.vapi.ai/api/v1/stream?vapi_public_key=${process.env.VAPI_PUBLIC_KEY}&vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}`;
+    // This URL points to OUR OWN server bridge
+    const bridgeUrl = `wss://sturdy-carnival-production.up.railway.app/call/ws-bridge?vapi_assistant_id=${process.env.VAPI_ASSISTANT_ID}&customer_phone_number=${callerNumber}`;
 
     return res.json({
-      url: fullUrl,
-      websocket_url: fullUrl,
-      wss_url: fullUrl,
-      config: {
-        vapi_public_key: process.env.VAPI_PUBLIC_KEY,
-        vapi_assistant_id: process.env.VAPI_ASSISTANT_ID
-      },
-      params: {
-        vapi_public_key: process.env.VAPI_PUBLIC_KEY,
-        vapi_assistant_id: process.env.VAPI_ASSISTANT_ID
-      }
+      url: bridgeUrl,
+      websocket_url: bridgeUrl
     });
   } catch (err) {
     console.error('Voicebot error:', err);
