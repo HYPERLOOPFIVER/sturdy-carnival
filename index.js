@@ -88,29 +88,41 @@ wss.on('connection', async (ws, req) => {
 
         // 3. VAPI -> EXOTEL (WITH STREAMSID)
         vapiWs.on('message', (data, isBinary) => {
-            if (isBinary) return;
+            // 1. Binary audio frame from Vapi
+            if (isBinary) {
+                console.log('[VAPI AUDIO CHUNK RECEIVED]');
+                console.log('[EXOTEL] Sending audio chunk, bytes:', data.length);
 
-            try {
-                const msg = JSON.parse(data.toString());
-                
-                if (msg.type === 'audio' && ws.readyState === WebSocket.OPEN && streamSid) {
-                    ws.send(JSON.stringify({
-                        event: 'media',
-                        stream_sid: streamSid,
-                        media: {
-                            payload: msg.data
-                        }
-                    }));
+                if (!streamSid) {
+                    console.log('[EXOTEL] No streamSid yet');
+                    return;
                 }
 
-                if (msg.type !== 'audio') console.log('[VAPI MESSAGE]', msg.type);
+                const payload = Buffer.from(data).toString('base64');
+
+                ws.send(JSON.stringify({
+                    event: 'media',
+                    stream_sid: streamSid,
+                    media: {
+                        payload
+                    }
+                }));
+
+                return;
+            }
+
+            // 2. JSON control messages
+            try {
+                const msg = JSON.parse(data.toString());
+
+                console.log('[VAPI MESSAGE]', msg.type);
 
                 if (msg.type === 'hangup') {
                     console.log('[VAPI] Hangup');
                     ws.close();
                 }
             } catch (err) {
-                console.error('[VAPI ERROR]', err.message);
+                console.error('[VAPI JSON ERROR]', err.message);
             }
         });
 
