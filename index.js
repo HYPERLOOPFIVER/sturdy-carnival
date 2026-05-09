@@ -31,11 +31,7 @@ wss.on('connection', async (ws, req) => {
             },
             body: JSON.stringify({
                 assistantId: assistantId,
-                transport: { provider: 'vapi.websocket' },
-                audio: {
-                    input: { encoding: 'mulaw', sampleRate: 8000 },
-                    output: { encoding: 'mulaw', sampleRate: 8000 }
-                }
+                transport: { provider: 'vapi.websocket' }
             })
         });
 
@@ -65,6 +61,7 @@ wss.on('connection', async (ws, req) => {
 
         // 2. EXOTEL -> VAPI
         let streamSid = null;
+        let audioChunkCount = 0;
 
         ws.on('message', (message) => {
             try {
@@ -94,8 +91,10 @@ wss.on('connection', async (ws, req) => {
         vapiWs.on('message', (data, isBinary) => {
             // 1. Binary audio frame from Vapi
             if (isBinary) {
-                console.log('[VAPI AUDIO CHUNK RECEIVED]');
-                console.log('[EXOTEL] Sending audio chunk, bytes:', data.length);
+                audioChunkCount++;
+                if (audioChunkCount % 50 === 0) {
+                    console.log(`[AUDIO] ${audioChunkCount} chunks forwarded`);
+                }
 
                 if (!streamSid) {
                     console.log('[EXOTEL] No streamSid yet');
