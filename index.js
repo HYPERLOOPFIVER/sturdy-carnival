@@ -5,6 +5,7 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { initFirebase } from './services/firebase.js';
 import { initGroq } from './services/groq.js';
+import { mulaw } from 'alawmulaw';
 import callRoutes from './routes/call.js';
 
 dotenv.config();
@@ -53,8 +54,8 @@ wss.on('connection', async (ws, req) => {
                 type: 'start',
                 assistantId: assistantId,
                 audio: {
-                    input: { encoding: 'mulaw', sampleRate: 8000 },
-                    output: { encoding: 'mulaw', sampleRate: 8000 }
+                    input: { encoding: 'linear16', sampleRate: 8000 },
+                    output: { encoding: 'linear16', sampleRate: 8000 }
                 }
             }));
         });
@@ -74,6 +75,7 @@ wss.on('connection', async (ws, req) => {
                 }
                 
                 if (packet.event === 'media' && vapiWs.readyState === WebSocket.OPEN) {
+                    if (audioChunkCount % 50 === 0) console.log('[EXOTEL] Caller audio received');
                     vapiWs.send(JSON.stringify({
                         type: 'audio',
                         data: packet.media.payload
@@ -92,24 +94,33 @@ wss.on('connection', async (ws, req) => {
             // 1. Binary audio frame from Vapi
             if (isBinary) {
                 audioChunkCount++;
-                if (audioChunkCount % 50 === 0) {
-                    console.log(`[AUDIO] ${audioChunkCount} chunks forwarded`);
-                }
-
+                
                 if (!streamSid) {
-                    console.log('[EXOTEL] No streamSid yet');
+                    if (audioChunkCount % 50 === 0) console.log('[EXOTEL] No streamSid yet');
                     return;
                 }
 
-                const payload = Buffer.from(data).toString('base64');
+                // Convert 16-bit PCM (from Vapi) to Int16Array
+                const pcm = new Int16Array(
+                    data.buffer,
+                    data.byteOffset,
+                    data.length / 2
+                );
+
+                // Encode to μ-law (required by Exotel)
+                const ulawPayload = Buffer.from(mulaw.encode(pcm)).toString('base64');
 
                 ws.send(JSON.stringify({
                     event: 'media',
                     stream_sid: streamSid,
                     media: {
-                        payload
+                        payload: ulawPayload
                     }
                 }));
+
+                if (audioChunkCount % 50 === 0) {
+                    console.log(`[AUDIO] ${audioChunkCount} chunks transcoded and forwarded`);
+                }
 
                 return;
             }
