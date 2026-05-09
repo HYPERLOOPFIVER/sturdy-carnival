@@ -5,7 +5,8 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { initFirebase } from './services/firebase.js';
 import { initGroq } from './services/groq.js';
-import { mulaw } from 'alawmulaw';
+import alawmulaw from 'alawmulaw';
+const { mulaw } = alawmulaw;
 import callRoutes from './routes/call.js';
 
 dotenv.config();
